@@ -13,6 +13,8 @@
  * Copyright 2021 Matt Fiddaman
  */
 
+'use strict';
+
 const defaultchan = 'omnios';
 const nick_col_override = {
 	andyf:	'ooce',
@@ -31,12 +33,13 @@ const u_hchar = '[/\\-;:!%&=~\\.\\+\\$,\\w]';
 const u_proto = '(?:https?|ftp)';
 const u_auth = `(?:${u_char}+@)`;
 const u_host = '(?:(?:[-a-z0-9]+\\.?)+)';
-const u_path = `(?:(?:\\/${u_char}*)+\/?)`;
+const u_path = `(?:(?:\\/${u_char}*)+/?)`;
 const u_query = `(?:\\?${u_char}+)`;
 const u_hash = `(?:#${u_hchar}+)`;
 const url_regex = new RegExp(
-	`^(.*)(${u_proto}:\/\/${u_auth}?${u_host}${u_path}?${u_query}?${u_hash}?)`,
-	'i');
+	`^(.*)(${u_proto}://${u_auth}?${u_host}${u_path}?${u_query}?${u_hash}?)`,
+	'i'
+);
 
 let channel_regex = /#[-\w]+/g;
 const highlight_regex = /\u{1f409}\u{1f404}\u{1f409}(.+?)\u{1f404}\u{1f409}\u{1f404}/u;
@@ -52,6 +55,32 @@ let picker_open = false;
 let today;
 let initsearch;
 
+HTMLElement.prototype.enable = function () {
+	this.classList.remove('disabled');
+	this.setAttribute('disabled', false);
+};
+
+HTMLElement.prototype.disable = function () {
+	this.classList.add('disabled');
+	this.setAttribute('disabled', true);
+};
+
+Object.defineProperty(HTMLElement, 'disabled', {
+	get() {
+		return this.getAttribute('disabled') === true;
+	}
+});
+
+NodeList.prototype.enable = function () {
+	for (const elem in this)
+		elem.enable();
+};
+
+NodeList.prototype.disable = function () {
+	for (const elem in this)
+		elem.disable();
+};
+
 // Keybindings
 
 const keybind_disable = (e) => e;
@@ -62,7 +91,7 @@ const keybind_main = (e) => {
 
 	switch (e.key) {
 		case '?':
-			$('#toggle_help').trigger('click');
+			document.getElementById('toggle_help').click();
 			break;
 		case '<':
 			switch_channel(false);
@@ -71,7 +100,8 @@ const keybind_main = (e) => {
 			switch_channel(true);
 			break;
 		case '/':
-			$('#menu_search input[name=\'search\']').focus().select();
+			document.querySelector('#menu_search input[name=\'search\']').focus();
+			document.querySelector('#menu_search input[name=\'search\']').select();
 			break;
 		default:
 			if (e.shiftKey)
@@ -79,36 +109,38 @@ const keybind_main = (e) => {
 
 			switch (e.key) {
 				case 'Escape':
-					$('#overlay > * > header:visible')
-						.trigger('click');
+					document.querySelector('#overlay > * > header').forEach(e => {
+						if (e.display !== 'none')
+							e.click();
+					});
 					break;
 				case 'Left':
 				case 'ArrowLeft':
 					if (!picker_open)
-						$('#date_dec').trigger('click');
+						document.querySelector('#date_dec').click();
 					break;
 				case 'Right':
 				case 'ArrowRight':
 					if (!picker_open)
-						$('#date_inc').trigger('click');
+						document.querySelector('#date_inc').click();
 					break;
 				case 't':
-					$('#date_today').trigger('click');
+					document.querySelector('#date_today').click();
 					break;
 				case 'd':
-					$('#toggle_dl').trigger('click');
+					document.querySelector('#toggle_dl').click();
 					break;
 				case 'r':
-					$('#refresh').trigger('click');
+					document.querySelector('#refresh').click();
 					break;
 				case 'm':
-					$('#toggle_sys').trigger('click');
+					document.querySelector('#toggle_sys').click();
 					break;
 				case 's':
-					$('#toggle_settings').trigger('click');
+					document.querySelector('#toggle_settings').click();
 					break;
 				case 'c':
-					$('#channels div.current').addClass('sel');
+					document.querySelector('#channels div.current').classList.add('sel');
 					bindkeys('chansel');
 					break;
 				default:
@@ -121,12 +153,12 @@ const keybind_main = (e) => {
 
 const keybind_search_bar = (e) => {
 	if (e.key === 'Escape')
-		$('#menu_search input:focus').trigger('blur');
+		document.querySelector('#menu_search input:focus').blur();
 };
 
 const keybind_chansel = (e) => {
-	const $cur = $('#channels div.sel:first');
-	let $next;
+	const cur = document.querySelector('#channels div.sel');
+	let next;
 
 	if (e.shiftKey)
 		return;
@@ -137,41 +169,51 @@ const keybind_chansel = (e) => {
 		case 'c':
 		case 'Down':
 		case 'ArrowDown':
-			$next = $cur.next();
-			if (!$next.length)
-				$next = $('#channels div:first');
-			$cur.removeClass('sel');
-			$next.addClass('sel');
+			next = cur?.nextElementSibling;
+			if (next == null)
+				next = document.querySelector('#channels div:first-child');
+			cur.classList.remove('sel');
+			next.classList.add('sel');
 			break;
 		case 'Up':
 		case 'ArrowUp':
-			$next = $cur.prev();
-			if (!$next.length)
-				$next = $('#channels div:last');
-			$cur.removeClass('sel');
-			$next.addClass('sel');
+			next = cur?.previousElementSibling;
+			if (next == null)
+				next = document.querySelector('#channels div:last-child');
+			cur.classList.remove('sel');
+			next.classList.add('sel');
 			break;
 		case ' ':
 		case 'Enter':
-			draw_logs($cur.attr('data-channel'), curdate);
-		// Fall-through
+			draw_logs(cur.getAttribute('data-channel'), curdate);
+			// Fall-through
 		case 'Escape':
-			$cur.removeClass('sel');
+			cur.classList.remove('sel');
 			bindkeys('main');
 			break;
-		default:
-			$next = $cur
-				.next(`div[data-channel^='${e.key}']`);
-			if (!$next.length) {
-				$next =
-				$(`#channels div[data-channel^='${e.key}']`)
-					.first();
+		default: {
+			const startChannel = cur.getAttribute('data-channel');
+			next = cur;
+
+			do {
+				next = next.nextElementSibling;
+
+				if (next == null)
+					next = document.querySelector('#channels div:first-child');
+
+				if (next.getAttribute('data-channel') === startChannel) {
+					next = null;
+					break;
+				}
+			} while (!next.getAttribute('data-channel').startsWith(e.key));
+
+			if (next != null) {
+				cur.classList.remove('sel');
+				next.classList.add('sel');
 			}
-			if ($next.length) {
-				$cur.removeClass('sel');
-				$next.addClass('sel');
-			}
+
 			break;
+		}
 	}
 };
 
@@ -321,7 +363,7 @@ function format_time(d) {
 }
 
 function fail_msg(msg) {
-	$('#fail_msg').text(msg).removeClass('hidden').show();
+	$('#fail_msg').text(msg).classList.remove('hidden').show();
 }
 
 function initialise_settings() {
@@ -407,6 +449,7 @@ function jp_span(jp, nick) {
 
 function parse_msg(msg) {
 	const words = msg.split(/(\s+)/).map(v => {
+		let m;
 		const _v = highlight_remove(v);
 		// Space
 		if (v.match(/^\s+$/)) {
@@ -524,7 +567,7 @@ function style_msg(_, target) {
 function nologs() {
 	if (!$('.log_row:visible').length) {
 		$('#nologs')
-			.removeClass('hidden')
+			.classList.remove('hidden')
 			.show()
 			.find('span').text(`#${curchan}`)
 			.next('span').text(curdate);
@@ -573,19 +616,19 @@ function switch_channel(pn) {
 }
 
 const handlers = {
-	JOIN: (v, r) => {
-		r.addClass('sysmsg');
-		r.find('.message').append(jp_span(true, v.nick));
+	JOIN: (v, $r) => {
+		$r.addClass('sysmsg');
+		$r.find('.message').append(jp_span(true, v.nick));
 	},
-	PART: (v, r) => {
-		r.addClass('sysmsg');
-		r.find('.message').append(jp_span(false, v.nick));
+	PART: (v, $r) => {
+		$r.addClass('sysmsg');
+		$r.find('.message').append(jp_span(false, v.nick));
 	},
-	QUIT: (v, r) => {
-		r.addClass('sysmsg');
-		r.find('.message').append(jp_span(false, v.nick));
+	QUIT: (v, $r) => {
+		$r.addClass('sysmsg');
+		$r.find('.message').append(jp_span(false, v.nick));
 	},
-	NICK: (v, r) => {
+	NICK: (v, $r) => {
 		/*
 		 * Update the nick cache to use the same colour for the
 		 * new nick as for the old.
@@ -598,7 +641,7 @@ const handlers = {
 					nick_class.cache[_nick];
 			}
 		}
-		r.find('.message').append(
+		$r.find('.message').append(
 			$('<span/>')
 				.addClass('nick_col')
 				.append($('<span/>').text('*** '))
@@ -608,12 +651,12 @@ const handlers = {
 				.append($('<span/>').text(' ***'))
 		);
 	},
-	PRIVMSG: (v, r) => {
-		const $msg = r.find('.message');
-		const $nick = r.find('.nick');
+	PRIVMSG: (v, $r) => {
+		const $msg = $r.find('.message');
+		const $nick = $r.find('.nick');
 
 		let m;
-		if (m = v.message.match(actionre)) {
+		if ((m = v.message.match(actionre))) {
 			$nick.text('*');
 			$msg.text(`${v.nick} ${m[1]}`);
 		} else {
@@ -746,7 +789,7 @@ async function draw_logs(chan = curchan, date = curdate) {
 		e.preventDefault();
 
 		if ($(this).parent('.log_row').hasClass('hl')) {
-			$(this).parent('.log_row').removeClass('hl');
+			$(this).parent('.log_row').classList.remove('hl');
 			window.history.replaceState(null, null,
 				document.location.pathname);
 
@@ -818,8 +861,8 @@ function sort_search(e) {
 		order = 'desc';
 
 	$('#search_log_headings span i.fas')
-		.removeClass('fa-sort-up fa-sort-down')
-		.addClass('fa-sort');
+		.classList.remove('fa-sort-up fa-sort-down')
+		.classList.add('fa-sort');
 
 	tinysort('#search_logs .log_row', {
 		attr: `data-${sort_by}`,
@@ -832,8 +875,8 @@ function sort_search(e) {
 	});
 
 	$heading.find('i.fas')
-		.removeClass('fa-sort')
-		.addClass(order === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
+		.classList.remove('fa-sort')
+		.classList.add(order === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
 }
 
 async function draw_search(search) {
@@ -880,11 +923,11 @@ async function draw_search(search) {
 	$('#search_loader').show();
 	$('#search_logs .log_row').remove();
 	$('#search_log_headings span i.fas')
-		.removeClass('fa-sort-up fa-sort-down')
-		.addClass('fa-sort');
+		.classList.remove('fa-sort-up fa-sort-down')
+		.classList.add('fa-sort');
 	$('#search_log_headings span[data-sort=\'rank\'] i.fas')
-		.removeClass('fa-sort')
-		.addClass('fa-sort-down');
+		.classList.remove('fa-sort')
+		.classList.add('fa-sort-down');
 
 	let search_str = '';
 	[ 'channel', 'nick' ].forEach(x => {
@@ -937,7 +980,7 @@ async function draw_search(search) {
 
 		const $row = $template.clone()
 			.attr('id', `search_${i++}`)
-			.removeClass('hidden');
+			.classList.remove('hidden');
 
 		nicklist.set(log.nick, true);
 
@@ -1248,7 +1291,7 @@ $(async () => {
 		'.log_row_head#search_log_headings > span[data-sort]',
 		sort_search);
 
-	$('#menu_search form').on('submit', async function (e) {
+	$('#menu_search form').on('submit', function (e) {
 		e.preventDefault();
 		$('#menu_search input[name=\'search\']').trigger('blur');
 
